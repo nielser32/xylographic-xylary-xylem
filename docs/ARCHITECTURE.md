@@ -1,15 +1,15 @@
 # Architecture Overview
 
-This scaffold establishes the wiring for a browser-based procedural world generator written in vanilla JavaScript. The initial focus is on organizing modules, defining responsibilities, and ensuring the rendering surface is ready for future simulation stages.
+This scaffold establishes the wiring for a browser-based procedural world generator written in vanilla JavaScript. The initial focus is on organizing modules, defining responsibilities, and ensuring the rendering surface is ready for future simulation stages. The placeholder renderer now leans on deterministic noise so pan/zoom and layer toggles can be exercised while deeper worldgen systems come online.
 
 ## Module Responsibilities
 
 - **`index.html`** — Declares the full-screen canvas (`#map`) and an overlay container for controls. Provides baseline styling to ensure an edge-to-edge viewport without scrollbars.
-- **`src/main.js`** — Boots the application, owns the top-level `state` object, wires UI events to state mutations, maintains the animation loop with an FPS meter, and forwards render calls to `render.js`. Also handles device-pixel-aware resizing so the canvas always matches the viewport.
+- **`src/main.js`** — Boots the application, owns the top-level `state` object, wires UI events to state mutations, maintains the animation loop with an FPS meter, and forwards render calls to `render.js`. It also manages device-pixel-aware resizing and pointer-driven pan/zoom (wheel zoom that focuses on the cursor, pointer-drag panning, and view resets when new seeds are applied).
 - **`src/ui.js`** — Builds the control bar (seed entry, regenerate button, layer toggles, FPS readout). Emits `CustomEvent`s (`ui:*`) that `main.js` consumes. Future UI agents will extend this module with import/export controls and debug overlays.
-- **`src/render.js`** — Receives state and view metadata to draw the current frame. The placeholder implementation rasterizes a deterministic color-LUT tile map into ImageData with device-pixel snapping so pan/zoom logic stays verifiable without binary assets. Later revisions will swap in biome-aware rendering pipelines.
+- **`src/render.js`** — Receives state and view metadata to draw the current frame. The placeholder implementation rasterizes seeded Simplex FBM noise into ImageData, derives biome tints, and applies optional overlays (rivers, lakes, contour hints) according to the UI toggles. The renderer still snaps to device pixels so pan/zoom interactions remain crisp.
 - **`src/worldgen.js`** — Placeholder factory for elevation fields. This module will orchestrate procedural world generation, eventually delegating to noise, hydrology, climate, and biome classification helpers.
-- **`src/noise.js`** — Houses the deterministic random number generator and fractal noise sampling utilities. Currently stubbed; will be implemented with Mulberry32 + Simplex FBM to guarantee reproducible worlds.
+- **`src/noise.js`** — Houses the deterministic random number generator and fractal noise sampling utilities. Mulberry32 provides seeded RNG streams and `noise2D` exposes a cached Simplex FBM sampler so every module can draw reproducible fields.
 - **`src/biomes.js`** — Placeholder biome classifier. Future agents will convert environmental fields (elevation, temperature, precipitation, moisture, hydrology flags) into biome identifiers via threshold tables and smoothing.
 - **`presets/temperate_hemisphere.json`** — Seed configuration slot for reusable parameter packs.
 - **`assets/.gitkeep`** — Keeps the assets directory tracked until art placeholders land.
@@ -27,8 +27,10 @@ No binary assets in PRs. Use inline SVG or data URIs when needed. Sprite atlas c
 4. **Biome classification** evaluates climate and hydrology fields to assign biome IDs, applying smoothing filters to prevent speckle.
 5. **Rendering** translates biome IDs and hydrology overlays into pixel colors, using a color-blind-safe palette and optional contour lines.
 
-Each stage feeds the next (`elevation → hydrology → climate → biomes → renderer`), ensuring clear separation of concerns and straightforward debugging.
+Each stage feeds the next (`elevation → hydrology → climate → biomes → renderer`), ensuring clear separation of concerns and straightforward debugging. The current placeholder renderer stands in for steps 2–5 by synthesizing pseudo-fields from deterministic noise so interaction plumbing can be validated.
+
+Seed flow: UI → `main.js` → `worldgen.makeElevation` (delegating to `noise2D`) → `render.js`; elevation synthesis blends FBM samples with a continental mask before reaching downstream systems.
 
 ## Determinism Plan
 
-All procedural steps will derive randomness from a single seeded RNG provided by `src/noise.js`. Once implemented, supplying the same seed (via the UI or preset JSON) will regenerate identical terrain, satisfying the determinism requirements outlined in `AGENTS.md`. Export/import routines will persist the seed, parameter packs, and version metadata so future runs can reproduce results bit-for-bit.
+All procedural steps derive randomness from the Mulberry32-based `createRng` helper and the cached Simplex FBM sampler exposed by `src/noise.js`. Supplying the same seed (via the UI or preset JSON) will regenerate identical terrain, satisfying the determinism requirements outlined in `AGENTS.md`. Export/import routines will persist the seed, parameter packs, and version metadata so future runs can reproduce results bit-for-bit.

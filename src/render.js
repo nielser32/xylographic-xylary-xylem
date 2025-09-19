@@ -1,24 +1,19 @@
 /**
  * Parameters:
- * - COLOR_LUT: Uint8 RGBA tuples — placeholder biome colors chosen for color-blind safety.
- * - TILE_WORLD_SIZE: number — world-space size of the synthetic tile cells in CSS pixels.
- * - BIOME_BAND_HEIGHT: number — vertical span controlling broad color bands for variation.
- * - AXIS_COLOR: string — color of the origin crosshair overlay.
+ * - HEATMAP_RAMP: Array<[number, number[]]> — elevation color stops for biome-tinted mode.
+ * - CONTOUR_STEP_CELLS: number — grid spacing in world cells for contour overlay.
+ * - CONTOUR_COLOR: string — RGBA stroke color for contour grid lines.
  */
-const COLOR_LUT = [
-  [12, 24, 48, 255], // deep ocean
-  [20, 54, 88, 255], // ocean shelf
-  [34, 96, 120, 255], // shallow water
-  [56, 110, 72, 255], // coastal wetland
-  [100, 140, 78, 255], // temperate forest
-  [160, 142, 68, 255], // savanna/grassland
-  [186, 114, 94, 255], // arid shrubland
-  [220, 216, 200, 255], // alpine/snow
+const HEATMAP_RAMP = [
+  [0.0, [16, 36, 68, 255]],
+  [0.25, [34, 82, 120, 255]],
+  [0.5, [86, 142, 96, 255]],
+  [0.75, [164, 146, 96, 255]],
+  [0.9, [210, 196, 168, 255]],
+  [1.0, [244, 244, 240, 255]],
 ];
-
-const TILE_WORLD_SIZE = 48;
-const BIOME_BAND_HEIGHT = TILE_WORLD_SIZE * 3;
-const AXIS_COLOR = 'rgba(255, 255, 255, 0.18)';
+const CONTOUR_STEP_CELLS = 16;
+const CONTOUR_COLOR = 'rgba(255, 255, 255, 0.08)';
 
 let cachedImageData = null;
 let cachedWidth = 0;
@@ -34,31 +29,29 @@ let cachedHeight = 0;
  * @param {number} view.height - Canvas height in device pixels.
  */
 export function draw(state, view) {
-  const { context: ctx, pixelRatio, width, height } = view;
+  const { context: ctx, pixelRatio = 1, width, height } = view;
   if (!ctx) return;
 
   const imageData = ensureImageData(ctx, width, height);
-  rasterize(imageData, state, pixelRatio || 1);
+  if (state?.world?.elev instanceof Float32Array) {
+    rasterizeElevation(imageData, state, pixelRatio);
+  } else {
+    rasterizePlaceholder(imageData);
+  }
 
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.putImageData(imageData, 0, 0);
   ctx.restore();
 
-  const cssWidth = width / (pixelRatio || 1);
-  const cssHeight = height / (pixelRatio || 1);
-
-  ctx.save();
-  ctx.setTransform(pixelRatio || 1, 0, 0, pixelRatio || 1, 0, 0);
-  drawAxes(ctx, {
-    viewportWidth: cssWidth,
-    viewportHeight: cssHeight,
-    panX: state?.view?.panX || 0,
-    panY: state?.view?.panY || 0,
-    zoom: state?.view?.zoom || 1,
-    pixelRatio: pixelRatio || 1,
-  });
-  ctx.restore();
+  if (state?.layers?.contours && state?.world?.elev) {
+    ctx.save();
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    const cssWidth = width / pixelRatio;
+    const cssHeight = height / pixelRatio;
+    drawContourGrid(ctx, state, cssWidth, cssHeight);
+    ctx.restore();
+  }
 }
 
 function ensureImageData(ctx, width, height) {
@@ -70,98 +63,145 @@ function ensureImageData(ctx, width, height) {
   return cachedImageData;
 }
 
-function rasterize(imageData, state, pixelRatio) {
-  const data = imageData.data;
-  const width = imageData.width;
-  const height = imageData.height;
-  const view = state?.view || {};
+function rasterizeElevation(imageData, state, pixelRatio) {
+  const { data, width, height } = imageData;
+  const world = state.world;
+  const view = state.view || {};
+  const layers = state.layers || {};
   const zoom = Math.max(view.zoom || 1, Number.EPSILON);
   const panX = view.panX || 0;
   const panY = view.panY || 0;
-  const invPixelRatio = 1 / pixelRatio;
-  const seedHash = hashSeed(String(state?.seed ?? ''));
+  const invPixelRatio = 1 / (pixelRatio || 1);
+  const worldWidth = world.width || 1;
+  const worldHeight = world.height || 1;
+  const cellSize = computeCellSize(view, worldWidth, worldHeight);
+  const halfWidth = (worldWidth * cellSize) / 2;
+  const halfHeight = (worldHeight * cellSize) / 2;
+  const grayscale = layers.biomes === false;
 
   let offset = 0;
   for (let y = 0; y < height; y += 1) {
     const cssY = y * invPixelRatio;
     const worldY = (cssY - panY) / zoom;
-    const cellY = Math.floor(worldY / TILE_WORLD_SIZE);
+    const sampleY = (worldY + halfHeight) / cellSize;
+    const iy = clampIndex(sampleY, worldHeight);
 
-    let cssX = 0;
     for (let x = 0; x < width; x += 1) {
+      const cssX = x * invPixelRatio;
       const worldX = (cssX - panX) / zoom;
-      const cellX = Math.floor(worldX / TILE_WORLD_SIZE);
-      const colorIndex = sampleColorIndex(cellX, cellY, worldX, worldY, seedHash);
-      const color = COLOR_LUT[colorIndex];
-
+      const sampleX = (worldX + halfWidth) / cellSize;
+      const ix = clampIndex(sampleX, worldWidth);
+      const value = world.elev[iy * worldWidth + ix] ?? 0;
+      const color = grayscale ? sampleGrayscale(value) : sampleRamp(value);
       data[offset] = color[0];
       data[offset + 1] = color[1];
       data[offset + 2] = color[2];
-      data[offset + 3] = color[3];
+      data[offset + 3] = 255;
       offset += 4;
-
-      cssX += invPixelRatio;
     }
   }
 }
 
-function sampleColorIndex(cellX, cellY, worldX, worldY, seedHash) {
-  const latBand = positiveMod(Math.floor(worldY / BIOME_BAND_HEIGHT), COLOR_LUT.length);
-  const gradient = Math.sin(worldX * 0.02) + Math.cos(worldY * 0.015);
-  let gradientOffset = 0;
-  if (gradient > 0.9) {
-    gradientOffset = 2;
-  } else if (gradient > 0.35) {
-    gradientOffset = 1;
-  } else if (gradient < -0.9) {
-    gradientOffset = -2;
-  } else if (gradient < -0.35) {
-    gradientOffset = -1;
+function rasterizePlaceholder(imageData) {
+  const { data } = imageData;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 24;
+    data[i + 1] = 28;
+    data[i + 2] = 36;
+    data[i + 3] = 255;
   }
-
-  const jitter = (pseudoRandom(cellX, cellY, seedHash) % 3) - 1; // -1, 0, 1
-  const index = positiveMod(latBand + gradientOffset + jitter, COLOR_LUT.length);
-  return index;
 }
 
-function drawAxes(ctx, { viewportWidth, viewportHeight, panX, panY, zoom, pixelRatio }) {
-  const zoomSafe = Math.max(zoom || 1, Number.EPSILON);
-  const originX = snapToDevice(panX, pixelRatio);
-  const originY = snapToDevice(panY, pixelRatio);
-
-  ctx.save();
-  ctx.strokeStyle = AXIS_COLOR;
-  ctx.lineWidth = Math.max(1 / pixelRatio, 1 / (zoomSafe * pixelRatio));
+function drawContourGrid(ctx, state, cssWidth, cssHeight) {
+  const world = state.world;
+  const view = state.view || {};
+  const zoom = Math.max(view.zoom || 1, Number.EPSILON);
+  const panX = view.panX || 0;
+  const panY = view.panY || 0;
+  const cellSize = computeCellSize(view, world.width || 1, world.height || 1);
 
   ctx.beginPath();
-  ctx.moveTo(snapToDevice(0, pixelRatio), originY);
-  ctx.lineTo(snapToDevice(viewportWidth, pixelRatio), originY);
-  ctx.moveTo(originX, snapToDevice(0, pixelRatio));
-  ctx.lineTo(originX, snapToDevice(viewportHeight, pixelRatio));
-  ctx.stroke();
-  ctx.restore();
-}
+  ctx.strokeStyle = CONTOUR_COLOR;
+  ctx.lineWidth = 1;
 
-function hashSeed(seed) {
-  let hash = 2166136261 >>> 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
+  for (let x = 0; x <= world.width; x += CONTOUR_STEP_CELLS) {
+    const worldX = (x - world.width / 2) * cellSize;
+    const cssX = worldX * zoom + panX;
+    if (cssX + 1 < 0 || cssX - 1 > cssWidth) {
+      continue;
+    }
+    const px = Math.round(cssX) + 0.5;
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, cssHeight);
   }
-  return hash >>> 0;
+
+  for (let y = 0; y <= world.height; y += CONTOUR_STEP_CELLS) {
+    const worldY = (y - world.height / 2) * cellSize;
+    const cssY = worldY * zoom + panY;
+    if (cssY + 1 < 0 || cssY - 1 > cssHeight) {
+      continue;
+    }
+    const py = Math.round(cssY) + 0.5;
+    ctx.moveTo(0, py);
+    ctx.lineTo(cssWidth, py);
+  }
+
+  ctx.stroke();
 }
 
-function pseudoRandom(x, y, seedHash) {
-  let h = seedHash ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return (h ^ (h >>> 16)) >>> 0;
+function computeCellSize(view, worldWidth, worldHeight) {
+  if (!Number.isFinite(worldWidth) || !Number.isFinite(worldHeight) || worldWidth <= 0 || worldHeight <= 0) {
+    return 1;
+  }
+  const width = Math.max(view.width || 0, 1);
+  const height = Math.max(view.height || 0, 1);
+  const scaleX = width / worldWidth;
+  const scaleY = height / worldHeight;
+  return Math.min(scaleX, scaleY);
 }
 
-function positiveMod(value, modulus) {
-  const mod = modulus <= 0 ? 1 : modulus;
-  return ((value % mod) + mod) % mod;
+function clampIndex(value, size) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  const max = Math.max(0, size - 1);
+  if (value <= 0) return 0;
+  if (value >= max) return max;
+  return Math.floor(value);
 }
 
-function snapToDevice(value, pixelRatio) {
-  return Math.round(value * pixelRatio) / pixelRatio;
+function sampleGrayscale(value) {
+  const v = clamp01(value);
+  const shade = Math.round(v * 255);
+  return [shade, shade, shade, 255];
+}
+
+function sampleRamp(value) {
+  const v = clamp01(value);
+  for (let i = 0; i < HEATMAP_RAMP.length - 1; i += 1) {
+    const [t0, c0] = HEATMAP_RAMP[i];
+    const [t1, c1] = HEATMAP_RAMP[i + 1];
+    if (v >= t0 && v <= t1) {
+      const span = t1 - t0 || 1;
+      const ratio = (v - t0) / span;
+      return [
+        Math.round(lerp(c0[0], c1[0], ratio)),
+        Math.round(lerp(c0[1], c1[1], ratio)),
+        Math.round(lerp(c0[2], c1[2], ratio)),
+        Math.round(lerp(c0[3], c1[3], ratio)),
+      ];
+    }
+  }
+  const last = HEATMAP_RAMP[HEATMAP_RAMP.length - 1][1];
+  return [last[0], last[1], last[2], last[3]];
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function clamp01(value) {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
 }

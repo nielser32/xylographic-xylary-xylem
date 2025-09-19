@@ -108,7 +108,9 @@ export function initUI(root, initial = {}) {
   const api = {
     root,
     updateState(nextState) {
-      if (typeof nextState.seed === 'string' && nextState.seed !== seedInput.value) {
+      if (typeof nextState.seedText === 'string' && nextState.seedText !== seedInput.value) {
+        seedInput.value = nextState.seedText;
+      } else if (typeof nextState.seed === 'string' && nextState.seed !== seedInput.value) {
         seedInput.value = nextState.seed;
       }
       if (nextState.layers) {
