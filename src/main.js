@@ -9,6 +9,7 @@
  */
 import { initUI } from './ui.js';
 import { draw } from './render.js';
+import { makeElevation } from './worldgen.js';
 
 const marginPx = 0;
 const FPS_SMOOTHING = 0.15;
@@ -34,6 +35,7 @@ const initialSeed = `${Date.now()}`;
 
 const state = {
   seed: initialSeed,
+  world: null,
   layers: {
     rivers: true,
     lakes: true,
@@ -71,8 +73,8 @@ uiRoot.addEventListener('ui:seed-change', (event) => {
 
 uiRoot.addEventListener('ui:regenerate', (event) => {
   const { seed } = event.detail;
-  state.seed = seed;
   resetView();
+  regenerateWorld(seed);
   ui.updateState(state);
 });
 
@@ -255,9 +257,74 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+const FNV_OFFSET_BASIS = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
+
+function fnv1aBuffer(view) {
+  if (!view) {
+    return FNV_OFFSET_BASIS >>> 0;
+  }
+
+  let floats;
+  if (view instanceof Float32Array) {
+    floats = view;
+  } else if (ArrayBuffer.isView(view) && view.BYTES_PER_ELEMENT === 4) {
+    const length = view.byteLength / Float32Array.BYTES_PER_ELEMENT;
+    floats = new Float32Array(view.buffer, view.byteOffset, length);
+  } else if (view instanceof ArrayBuffer) {
+    floats = new Float32Array(view);
+  } else {
+    throw new TypeError('fnv1aBuffer expects a Float32Array or an ArrayBuffer of 32-bit floats.');
+  }
+
+  const scratch = new ArrayBuffer(Float32Array.BYTES_PER_ELEMENT);
+  const scratchView = new DataView(scratch);
+  const scratchBytes = new Uint8Array(scratch);
+
+  let hash = FNV_OFFSET_BASIS >>> 0;
+
+  for (let i = 0; i < floats.length; i += 1) {
+    scratchView.setFloat32(0, floats[i], true);
+    // Canonical little-endian bytes avoid platform endianness differences when hashing for cross-platform determinism.
+    for (let byteIndex = 0; byteIndex < scratchBytes.length; byteIndex += 1) {
+      hash ^= scratchBytes[byteIndex];
+      hash = Math.imul(hash, FNV_PRIME) >>> 0;
+    }
+  }
+
+  return hash >>> 0;
+}
+
+function regenerateWorld(nextSeed = state.seed) {
+  const resolvedSeed =
+    typeof nextSeed === 'string'
+      ? nextSeed
+      : nextSeed != null
+      ? String(nextSeed)
+      : state.seed;
+
+  state.seed = resolvedSeed;
+
+  const elevation = makeElevation(undefined, undefined, resolvedSeed);
+  const hash = fnv1aBuffer(elevation);
+  const hashHex = hash.toString(16).padStart(8, '0');
+
+  state.world = {
+    seed: resolvedSeed,
+    elevation,
+    hash,
+  };
+
+  console.log(`regenerateWorld hash 0x${hashHex}`);
+
+  state.dirty = true;
+  return hash;
+}
+
 function bootstrap() {
   resizeCanvas();
   resetView();
+  regenerateWorld(state.seed);
   ui.updateState(state);
   window.addEventListener('resize', resizeCanvas, { passive: true });
   window.requestAnimationFrame(tick);
