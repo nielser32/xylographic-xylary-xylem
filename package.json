@@ -9,7 +9,7 @@
     "start": "node src/server.js",
     "build:css": "tailwindcss -i ./src/input.css -o ./public/styles.css --minify",
     "lint": "echo \"No lint configured yet\"",
-    "test": "echo \"No tests yet\""
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +23,7 @@
   "devDependencies": {
     "concurrently": "^9.2.1",
     "nodemon": "^3.1.10",
+    "supertest": "^7.1.4",
     "tailwindcss": "^3.4.16"
   }
 }
