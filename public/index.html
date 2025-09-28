@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Knowledge Graph</title>
+    <link rel="stylesheet" href="/assets/tailwind.css" />
+  </head>
+  <body class="min-h-screen flex flex-col">
+    <header class="bg-primary text-white py-6 shadow-md">
+      <div class="container mx-auto px-6">
+        <h1 class="text-3xl font-semibold">Xylographic Xylary Xylem</h1>
+        <p class="text-secondary/80">Visualize and share ideas in a vibrant knowledge graph.</p>
+      </div>
+    </header>
+
+    <main class="flex-1 container mx-auto px-6 py-10">
+      <section class="grid gap-6 md:grid-cols-2">
+        <article class="rounded-xl border border-quaternary bg-white/80 p-6 shadow-sm">
+          <h2 class="text-2xl font-bold text-primary">Items</h2>
+          <p class="mt-2 text-gray-700">
+            The server exposes a simple JSON API at <code class="font-mono">/api/items</code>.
+            Add new items via the form below; they will appear here once the front-end fetches them.
+          </p>
+          <pre id="items" class="mt-4 whitespace-pre-wrap rounded-lg bg-secondary p-4 text-sm text-gray-800">
+[]
+          </pre>
+        </article>
+        <article class="rounded-xl border border-quinary bg-white/80 p-6 shadow-sm">
+          <h2 class="text-2xl font-bold text-primary">Add Item</h2>
+          <form id="item-form" class="mt-4 space-y-4" enctype="multipart/form-data">
+            <div>
+              <label for="title" class="block text-sm font-medium text-gray-700">Title</label>
+              <input
+                id="title"
+                name="title"
+                class="mt-1 w-full rounded-lg border border-gray-300 p-2 focus:border-primary focus:outline-none focus:ring"
+                required
+              />
+            </div>
+            <div>
+              <label for="description" class="block text-sm font-medium text-gray-700">Description</label>
+              <textarea
+                id="description"
+                name="description"
+                rows="3"
+                class="mt-1 w-full rounded-lg border border-gray-300 p-2 focus:border-primary focus:outline-none focus:ring"
+              ></textarea>
+            </div>
+            <div>
+              <label for="asset" class="block text-sm font-medium text-gray-700">Upload asset</label>
+              <input id="asset" name="asset" type="file" class="mt-1 block w-full text-sm text-gray-600" />
+            </div>
+            <button
+              type="submit"
+              class="rounded-lg bg-primary px-4 py-2 font-semibold text-white transition hover:bg-tertiary"
+            >
+              Save Item
+            </button>
+          </form>
+          <p id="status" class="mt-4 text-sm text-gray-600"></p>
+        </article>
+      </section>
+    </main>
+
+    <footer class="bg-quaternary py-4">
+      <div class="container mx-auto px-6 text-sm text-gray-700">
+        Built with Express, Tailwind CSS, and SQLite.
+      </div>
+    </footer>
+
+    <script>
+      async function refreshItems() {
+        const response = await fetch('/api/items');
+        const payload = await response.json();
+        document.getElementById('items').textContent = JSON.stringify(payload.items, null, 2);
+      }
+
+      const form = document.getElementById('item-form');
+      const statusEl = document.getElementById('status');
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formData = new FormData(form);
+        statusEl.textContent = 'Saving...';
+
+        try {
+          const response = await fetch('/api/items', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            statusEl.textContent = error.error || 'Unable to save item.';
+            statusEl.className = 'mt-4 text-sm text-red-600';
+            return;
+          }
+
+          form.reset();
+          statusEl.textContent = 'Item saved!';
+          statusEl.className = 'mt-4 text-sm text-green-600';
+          refreshItems();
+        } catch (error) {
+          console.error(error);
+          statusEl.textContent = 'Unexpected error while saving the item.';
+          statusEl.className = 'mt-4 text-sm text-red-600';
+        }
+      });
+
+      refreshItems();
+    </script>
+  </body>
+</html>

@@ -3,3 +3,10 @@ assets/*.jpg
 assets/*.jpeg
 assets/*.webp
 assets/*.gif
+node_modules/
+.env
+uploads/
+data/*.db
+npm-debug.log*
+.DS_Store
+coverage/
