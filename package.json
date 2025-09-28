@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "build:css": "tailwindcss -i ./src/input.css -o ./public/styles.css --minify",
+    "build:css": "tailwindcss -i ./src/styles/tailwind.css -o ./public/styles.css --minify",
     "lint": "echo \"No lint configured yet\"",
     "test": "node --test"
   },
