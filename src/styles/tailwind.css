@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-charcoal-900 text-secondary antialiased min-h-screen font-sans;
+    background-image: radial-gradient(circle at top, rgba(255, 51, 158, 0.14), transparent 55%),
+      radial-gradient(circle at bottom right, rgba(36, 217, 244, 0.16), transparent 50%);
+    background-attachment: fixed;
+  }
+
+  a {
+    @apply text-primary transition-colors duration-200;
+  }
+
+  a:hover,
+  a:focus-visible {
+    @apply text-quinary;
+  }
+}
+
+@layer components {
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-charcoal-900;
+  }
+}
