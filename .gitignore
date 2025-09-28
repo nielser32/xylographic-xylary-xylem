@@ -14,3 +14,7 @@ yarn-error.log*
 
 # Env files
 .env
+
+# Generated storage
+uploads/
+data/
